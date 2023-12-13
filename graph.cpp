@@ -136,7 +136,7 @@ void Graph::init_nbr_cnt() {
     }
 }
 
-// 计算全部时间子图的共同邻居，不带时间边
+// 计算边的共同邻居
 void Graph::compute_common_neighbors() {
     if (cn_ == nullptr) cn_ = new vector<int>[m_] {};
     if (sup_ == nullptr) sup_ = new int[m_]{};  // 初始化为 0
@@ -149,6 +149,7 @@ void Graph::compute_common_neighbors() {
                 cn_[eid].emplace_back(p.first);
             }
         }
+        sort(cn_[eid].begin(), cn_[eid].end());
         sup_[eid] = cn_[eid].size();
         if (sup_[eid] > sup_max_) sup_max_ = sup_[eid];
     }
@@ -455,22 +456,28 @@ void Graph::index_baseline() {
     init_truss_deg();
 
     // 备份数据 sup_, nbr_cnt_, truss_, td_
-    auto data_copy = new tuple<int, int, int, int>[m_];
+    auto sup_copy = new int[m_];
+    auto nbr_cnt_copy = new int[m_];
+    auto truss_copy = new int[m_];
+    auto td_copy = new int[m_];
 
     for (int t_s = 0; t_s < t_; ++t_s) {
-        if (t_s % 100 == 0) printf("t = %d.\n", t_s);  // 记录运行程度
+        if (t_s % 100 == 0) printf("t = %d.\n", t_s);
+
         // 备份数据
-        for (int i = 0; i < m_; ++i) {
-            data_copy[i] = make_tuple(sup_[i], nbr_cnt_[i], truss_[i], td_[i]);
-        }
+        memcpy(sup_copy, sup_, sizeof(int) * m_);
+        memcpy(nbr_cnt_copy, nbr_cnt_, sizeof(int) * m_);
+        memcpy(truss_copy, truss_, sizeof(int) * m_);
+        memcpy(td_copy, td_, sizeof(int) * m_);
 
         compute_cn_time_bl(t_s);
         if (t_s == t_ - 1) break;
 
         // 恢复数据
-        for (int i = 0; i < m_; ++i) {
-            tie(sup_[i], nbr_cnt_[i], truss_[i], td_[i]) = data_copy[i];
-        }
+        memcpy(sup_, sup_copy, sizeof(int) * m_);
+        memcpy(nbr_cnt_, nbr_cnt_copy, sizeof(int) * m_);
+        memcpy(truss_, truss_copy, sizeof(int) * m_);
+        memcpy(td_, td_copy, sizeof(int) * m_);
 
         decremental_cn_bl(t_s);
     }
@@ -490,17 +497,20 @@ void Graph::index_baseline() {
 #endif
 
     print_idx_size();
-    delete[] data_copy;
+    delete[] sup_copy;
+    delete[] nbr_cnt_copy;
+    delete[] truss_copy;
+    delete[] td_copy;
 }
 
 void Graph::init_truss_time() {
-    // 备份nbr_cnt_, truss_
-    auto data_copy = new pair<int, int>[m_];
+    // 备份数据
+    auto nbr_cnt_copy = new int[m_];
+    auto truss_copy = new int[m_];
+    memcpy(nbr_cnt_copy, nbr_cnt_, sizeof(int) * m_);
+    memcpy(truss_copy, truss_, sizeof(int) * m_);
     auto cn_copy = new vector<int>[m_];
-    for (int i = 0; i < m_; i++) {
-        data_copy[i] = make_pair(nbr_cnt_[i], truss_[i]);
-        cn_copy[i] = cn_[i];
-    }
+    for (int i = 0; i < m_; i++) cn_copy[i] = cn_[i];
 
     queue<int> q;
     int* cnt = new int[k_max_ + 1];
@@ -512,6 +522,11 @@ void Graph::init_truss_time() {
 
             if (--nbr_cnt_[eid] != 0) continue;
 
+            if (!visit_[eid]) {
+                q.push(eid);
+                visit_[eid] = true;
+            }
+
             int trussness = truss_[eid];
             for (int w : cn_[eid]) {
                 int e1 = nbr_[u][w];
@@ -519,7 +534,7 @@ void Graph::init_truss_time() {
 
                 // process (u,w)
                 cn_[e1].erase(lower_bound(cn_[e1].begin(), cn_[e1].end(), v));  // 在cn(u,w) 删除v
-                if (truss_[e1] <= min(trussness, truss_[e2])) {
+                if (truss_[e1] <= trussness && truss_[e1] <= truss_[e2]) {
                     --td_[e1];
                     if (td_[e1] < truss_[e1] - 2 && !visit_[e1]) {
                         q.push(e1);
@@ -529,17 +544,13 @@ void Graph::init_truss_time() {
 
                 // process (v,w)
                 cn_[e2].erase(lower_bound(cn_[e2].begin(), cn_[e2].end(), u));  // 在cn(v,w) 删除u
-                if (truss_[e2] <= min(trussness, truss_[e1])) {
+                if (truss_[e2] <= trussness && truss_[e2] <= truss_[e1]) {
                     --td_[e2];
                     if (td_[e2] < truss_[e2] - 2 && !visit_[e2]) {
                         q.push(e2);
                         visit_[e2] = true;
                     }
                 }
-            }
-            if (!visit_[eid]) {
-                q.push(eid);
-                visit_[eid] = true;
             }
             cn_[eid].clear();
             // td_[eid] = 0;
@@ -578,7 +589,7 @@ void Graph::init_truss_time() {
                 int e2 = nbr_[v][w];
 
                 // process (u,w)
-                if (nt < truss_[e1] && truss_[e1] <= min(ot, truss_[e2])) {
+                if (nt < truss_[e1] && truss_[e1] <= ot && truss_[e1] <= truss_[e2]) {
                     --td_[e1];
                     if (td_[e1] < truss_[e1] - 2 && !visit_[e1]) {
                         q.push(e1);
@@ -587,7 +598,7 @@ void Graph::init_truss_time() {
                 }
 
                 // process (v,w)
-                if (nt < truss_[e2] && truss_[e2] <= min(ot, truss_[e1])) {
+                if (nt < truss_[e2] && truss_[e2] <= ot && truss_[e2] <= truss_[e1]) {
                     --td_[e2];
                     if (td_[e2] < truss_[e2] - 2 && !visit_[e2]) {
                         q.push(e2);
@@ -604,55 +615,49 @@ void Graph::init_truss_time() {
     }
 
     // 恢复数据
-    for (int i = 0; i < m_; i++) {
-        cn_[i] = cn_copy[i];
-        nbr_cnt_[i] = data_copy[i].first;
-        truss_[i] = data_copy[i].second;
-    }
+    for (int i = 0; i < m_; i++) cn_[i] = cn_copy[i];
+    memcpy(nbr_cnt_, nbr_cnt_copy, sizeof(int) * m_);
+    memcpy(truss_, truss_copy, sizeof(int) * m_);
 
     delete[] cnt;
-    delete[] data_copy;
     delete[] cn_copy;
+    delete[] nbr_cnt_copy;
+    delete[] truss_copy;
 }
 
+// 每次删除 k-1 的边，对于 k 边不影响
 void Graph::init_tt_cnt(const int& k) {
     memset(tt_cnt_, 0, sizeof(int) * m_);  // 必须置零
 
+    // 删除 truss < k 边，删除这些边不影响 k-truss子图
     for (int eid = 0; eid < m_; ++eid) {
-        if (truss_[eid] == -1) continue;  // 先前 k 迭代已经被处理过了
-
-        int u = edges_[eid].first;
-        int v = edges_[eid].second;
+        if (!truss_[eid]) continue;  // 先前 k 迭代已经被处理过了
         if (truss_[eid] < k) {
-            // 在剩下子图中删除 不满足 k 的边
+            int u = edges_[eid].first;
+            int v = edges_[eid].second;
             for (const auto& w : cn_[eid]) {
                 int e1 = nbr_[u][w];
                 int e2 = nbr_[v][w];
                 cn_[e1].erase(lower_bound(cn_[e1].begin(), cn_[e1].end(), v));
                 cn_[e2].erase(lower_bound(cn_[e2].begin(), cn_[e2].end(), u));
             }
-            truss_[eid] = -1;
-            continue;
+            truss_[eid] = 0;
         }
+    }
 
-        if (!truss_t_[eid][k - 2].empty() && truss_t_[eid][k - 2].back().second == t_) continue;
-
-        // 剩下边 满足 turss >= k 且 truss time 不是 t_ ,说明存在 k
-        int truss_time = truss_t_[eid][k - 2].back().second;
-
+    // 剩下边 满足 turss >= k
+    for (int eid = 0; eid < m_; ++eid) {
+        if (truss_[eid] < k) continue;
+        int truss_time = truss_t_[eid][k - 2].back().second;  // 即初始化索引的第一个时间窗口
+        int u = edges_[eid].first;
+        int v = edges_[eid].second;
         for (const int& w : cn_[eid]) {
-            int e1 = nbr_[u][w];
-            int e2 = nbr_[v][w];
-
-            if (k <= truss_[e1] && k <= truss_[e2]) {
-                int tt1 = truss_t_[e1][k - 2].back().second;
-                int tt2 = truss_t_[e2][k - 2].back().second;
-                if (tt1 <= truss_time && tt2 <= truss_time) ++tt_cnt_[eid];
-            }
+            int tt1 = truss_t_[nbr_[u][w]][k - 2].back().second;
+            int tt2 = truss_t_[nbr_[v][w]][k - 2].back().second;
+            if (tt1 <= truss_time && tt2 <= truss_time) ++tt_cnt_[eid];
         }
         if (tt_cnt_[eid] < k - 2) {
             printf("!!!Wrong: u=%d, v=%d, tt_cnt_=%d, k=%d\n", u, v, tt_cnt_[eid], k);
-            //            ::printf("??? tt1=%d, tt2=%d, truss_time=%d, w=%d\n",tt1,tt2,truss_time,w);
             exit(-1);
         }
     }
@@ -676,31 +681,30 @@ void Graph::index() {
     // 提前申请空间
     for (int i = 0; i < m_; ++i) {
         truss_t_[i].resize(truss_[i] - 1);  // "-2+1" truss >= 2 索引从下标为1的位置开始
-        sort(cn_[i].begin(), cn_[i].end());
     }
 
-    printf("Initialize truss time.\n");
+    printf("Initialize truss time...\n");
     init_truss_deg();
     init_truss_time();
 
     if (tt_cnt_ == nullptr) tt_cnt_ = td_;  // 地址复用
 
+    auto nbr_cnt_copy = new int[m_];
+    auto truss_copy = new int[m_];
     auto cn_copy = new vector<int>[m_];
-    auto data_copy = new pair<int, int>[m_];
-
+    
     queue<int> q;
     for (int k = 3; k <= k_max_; ++k) {
-        printf("------ Iteration k = %d / %d ------\n", k, k_max_);
-        init_tt_cnt(k);
+        printf("---- Iteration k = %d/%d ----\n", k, k_max_);
 
+        init_tt_cnt(k);
         // 备份数据
-        for (int i = 0; i < m_; i++) {
-            cn_copy[i] = cn_[i];
-            data_copy[i] = make_pair(nbr_cnt_[i], truss_[i]);
-        }
+        for (int i = 0; i < m_; i++) cn_copy[i] = cn_[i];
+        memcpy(nbr_cnt_copy, nbr_cnt_, sizeof(int) * m_);
+        memcpy(truss_copy, truss_, sizeof(int) * m_);
 
         for (int t_s = 1; t_s < t_; ++t_s) {
-            if (t_s % 10000 == 0) printf("t = %d.\n", t_s);  // 记录运行程度
+            if (t_s % 10000 == 0) printf("t = %d.\n", t_s);
             for (int i = edges_idx_[t_s - 1]; i < edges_idx_[t_s]; ++i) {
                 int u = edges_t_[i].first;
                 int v = edges_t_[i].second;
@@ -711,44 +715,74 @@ void Graph::index() {
                 if (truss_[eid] < k || (!truss_t_[eid][k - 2].empty() && truss_t_[eid][k - 2].back().second == t_)) continue;
 
                 int truss_time = truss_t_[eid][k - 2].back().second;
-                if (!visit_[eid]) {
-                    q.push(eid);
-                    visit_[eid] = true;
-                }
-                for (const auto& w : cn_[eid]) {
-                    int e1 = nbr_[u][w];
-                    int e2 = nbr_[v][w];
-
-                    if (!nbr_cnt_[eid]) {  // 完全删除
+                if (!nbr_cnt_[eid]) {  // 完全删除
+                    if (!visit_[eid]) {
+                        q.push(eid);
+                        visit_[eid] = true;
+                    }
+                    for (const auto& w : cn_[eid]) {
+                        int e1 = nbr_[u][w];
+                        int e2 = nbr_[v][w];
                         cn_[e1].erase(lower_bound(cn_[e1].begin(), cn_[e1].end(), v));
                         cn_[e2].erase(lower_bound(cn_[e2].begin(), cn_[e2].end(), u));
-                    }
 
-                    // 假设全都是完全删除
-                    if (truss_[e1] >= k && truss_[e2] >= k) {
-                        int tt1 = truss_t_[e1][k - 2].back().second;
-                        int tt2 = truss_t_[e2][k - 2].back().second;
-                        if (truss_time <= tt1 && tt2 <= tt1) {
-                            --tt_cnt_[e1];
-                            if (tt_cnt_[e1] < k - 2 && !visit_[e1]) {
-                                q.push(e1);
-                                visit_[e1] = true;
+                        if (truss_[e1] >= k && truss_[e2] >= k) {
+                            int tt1 = truss_t_[e1][k - 2].back().second;
+                            int tt2 = truss_t_[e2][k - 2].back().second;
+                            if (truss_time <= tt1 && tt2 <= tt1) {
+                                --tt_cnt_[e1];
+                                if (tt_cnt_[e1] < k - 2 && !visit_[e1]) {
+                                    q.push(e1);
+                                    visit_[e1] = true;
+                                }
+                            }
+                            if (truss_time <= tt2 && tt1 << tt2) {
+                                --tt_cnt_[e2];
+                                if (tt_cnt_[e2] < k - 2 && !visit_[e2]) {
+                                    q.push(e2);
+                                    visit_[e2] = true;
+                                }
                             }
                         }
-                        if (truss_time <= tt2 && tt1 << tt2) {
-                            --tt_cnt_[e2];
-                            if (tt_cnt_[e2] < k - 2 && !visit_[e2]) {
-                                q.push(e2);
-                                visit_[e2] = true;
+                    }
+                    cn_[eid].clear();
+                    // truss_[eid] = 0;
+                } else {
+                    // 部分删除
+                    int aaa = nbr_cnt_[eid];
+                    int szz = nbr_t_[u][v].size();
+                    int new_e_t = nbr_t_[u][v][nbr_t_[u][v].size() - aaa];
+                    if (new_e_t >= truss_time) { // ???
+                        if (!visit_[eid]) {
+                            q.push(eid);
+                            visit_[eid] = true;
+                        }
+                        for (const auto& w : cn_[eid]) {
+                            int e1 = nbr_[u][w];
+                            int e2 = nbr_[v][w];
+                            if (truss_[e1] >= k && truss_[e2] >= k) {
+                                int tt1 = truss_t_[e1][k - 2].back().second;
+                                int tt2 = truss_t_[e2][k - 2].back().second;
+
+                                if (truss_time <= tt1 && tt2 <= tt1 && new_e_t > tt1) {
+                                    --tt_cnt_[e1];
+                                    if (tt_cnt_[e1] < k - 2 && !visit_[e1]) {
+                                        q.push(e1);
+                                        visit_[e1] = true;
+                                    }
+                                }
+                                if (truss_time <= tt2 && tt1 <= tt2 && new_e_t > tt2) {
+                                    --tt_cnt_[e2];
+                                    if (tt_cnt_[e2] < k - 2 && !visit_[e2]) {
+                                        q.push(e2);
+                                        visit_[e2] = true;
+                                    }
+                                }
                             }
                         }
                     }
                 }
-
-                if (!nbr_cnt_[eid]) cn_[eid].clear();
-                // tt_cnt_[eid] = 0;
             }
-
             while (!q.empty()) {
                 int eid = q.front();
                 q.pop();
@@ -779,19 +813,19 @@ void Graph::index() {
                     truss_[eid] = 0;  // truss < k
                 }
 
-                // 更新 index
-                if (truss_t_[eid][k - 2].back().first == t_s) {
-                    truss_t_[eid][k - 2].back().second = new_t;
-                } else if (truss_t_[eid][k - 2].back().second < new_t) {
-                    truss_t_[eid][k - 2].emplace_back(make_pair(t_s, new_t));
-                }
-
                 // 更新 tt_cnt_
                 tt_cnt_[eid] = 0;
                 if (tt_arr.size() >= k - 2) {
                     for (int& t : tt_arr) {
                         if (t <= new_t) ++tt_cnt_[eid];
                     }
+                }
+
+                // 更新 index
+                if (truss_t_[eid][k - 2].back().first == t_s) {
+                    truss_t_[eid][k - 2].back().second = new_t;
+                } else if (truss_t_[eid][k - 2].back().second < new_t) {
+                    truss_t_[eid][k - 2].emplace_back(make_pair(t_s, new_t));
                 }
 
                 // 添加受影响的边入队
@@ -822,14 +856,13 @@ void Graph::index() {
         }
 
         // 恢复数据
-        for (int i = 0; i < m_; i++) {
-            cn_[i] = cn_copy[i];
-            nbr_cnt_[i] = data_copy[i].first;
-            truss_[i] = data_copy[i].second;
-        }
+        for (int i = 0; i < m_; i++) cn_[i] = cn_copy[i];
+        memcpy(nbr_cnt_, nbr_cnt_copy, sizeof(int) * m_);
+        memcpy(truss_, truss_copy, sizeof(int) * m_);
     }
-    delete[] data_copy;
     delete[] cn_copy;
+    delete[] nbr_cnt_copy;
+    delete[] truss_copy;
 
 #ifdef _LINUX_
     gettimeofday(&t_end, NULL);
@@ -912,9 +945,9 @@ void Graph::load_idx(const string& path) {
 }
 
 void Graph::print_graph_size() {
-    printf("Graph size: %.2f MB.\n", (float)edges_t_.size() * sizeof(pair<int, int>) / 1024 / 1024);
+    printf("Graph size: %.2f MB.\n", (float)edges_t_.size() * sizeof(int) * 3 / 1024 / 1024);
     if (log_f_ != nullptr)
-        fprintf(log_f_, "Graph size: %.2f MB.\n", (float)edges_t_.size() * sizeof(pair<int, int>) / 1024 / 1024);
+        fprintf(log_f_, "Graph size: %.2f MB.\n", (float)edges_t_.size() * sizeof(int) * 3 / 1024 / 1024);
 }
 
 void Graph::print_idx_size() {
@@ -1034,13 +1067,6 @@ int Graph::online_query(int t_s, int t_e, int k, int& snapshot_m) {
             if (cn[e2].size() < k - 2) q.push(e2);
         }
     }
-
-    // printf("====== online_query: [%d, %d]\n", t_s, t_e);
-    // for (int i = 0; i < edges_arr.size(); ++i) {
-    //     if (sup[i] >= k - 2) {
-    //         printf(" (%d, %d), k = %d, sup = %d\n", edges_arr[i].first, edges_arr[i].second, k, sup[i]);
-    //     }
-    // }
 
     delete[] nbr;
     delete[] cn;

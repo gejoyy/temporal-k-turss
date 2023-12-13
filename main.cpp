@@ -16,7 +16,6 @@ int main(int argc, char* argv[]) {
 
         g->index();
         g->write_idx(idx_path);
-        // g->write_idx_txt(idx_path);
         delete g;
     }
 
@@ -31,7 +30,6 @@ int main(int argc, char* argv[]) {
 
         g->index_baseline();
         g->write_idx(idx_path);
-        // g->write_idx_txt(idx_path);
         delete g;
     }
 
