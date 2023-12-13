@@ -1,1 +1,1 @@
-# temporal-k-turss
+## Index-based k-truss query on temporal graph
