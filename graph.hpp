@@ -14,7 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
-// #define _LINUX_
+#define _LINUX_
 
 #ifdef _LINUX_
 #include <sys/stat.h>

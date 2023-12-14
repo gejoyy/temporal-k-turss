@@ -683,7 +683,7 @@ void Graph::index() {
         truss_t_[i].resize(truss_[i] - 1);  // "-2+1" truss >= 2 索引从下标为1的位置开始
     }
 
-    printf("Initialize truss time...\n");
+    printf("initializing truss time...\n");
     init_truss_deg();
     init_truss_time();
 
@@ -692,7 +692,7 @@ void Graph::index() {
     auto nbr_cnt_copy = new int[m_];
     auto truss_copy = new int[m_];
     auto cn_copy = new vector<int>[m_];
-    
+
     queue<int> q;
     for (int k = 3; k <= k_max_; ++k) {
         printf("---- Iteration k = %d/%d ----\n", k, k_max_);
@@ -704,7 +704,7 @@ void Graph::index() {
         memcpy(truss_copy, truss_, sizeof(int) * m_);
 
         for (int t_s = 1; t_s < t_; ++t_s) {
-            if (t_s % 10000 == 0) printf("t = %d.\n", t_s);
+            // if (t_s % 10000 == 0) printf("t = %d.\n", t_s);
             for (int i = edges_idx_[t_s - 1]; i < edges_idx_[t_s]; ++i) {
                 int u = edges_t_[i].first;
                 int v = edges_t_[i].second;
@@ -715,7 +715,45 @@ void Graph::index() {
                 if (truss_[eid] < k || (!truss_t_[eid][k - 2].empty() && truss_t_[eid][k - 2].back().second == t_)) continue;
 
                 int truss_time = truss_t_[eid][k - 2].back().second;
-                if (!nbr_cnt_[eid]) {  // 完全删除
+
+                // 悲观策略，无论是否完全删除 都要重新计算 turss time 和 tt_cnt_
+                if (!visit_[eid]) {
+                    q.push(eid);
+                    visit_[eid] = true;
+                }
+                if (!nbr_cnt_[eid]) {  // 如果完全删除
+                    for (const auto& w : cn_[eid]) {
+                        int e1 = nbr_[u][w];
+                        int e2 = nbr_[v][w];
+                        cn_[e1].erase(lower_bound(cn_[e1].begin(), cn_[e1].end(), v));
+                        cn_[e2].erase(lower_bound(cn_[e2].begin(), cn_[e2].end(), u));
+
+                        if (k <= truss_[e1] && k <= truss_[e2]) {
+                            int tt1 = truss_t_[e1][k - 2].back().second;
+                            int tt2 = truss_t_[e2][k - 2].back().second;
+                            if (truss_time <= tt1 && tt2 <= tt1) {
+                                --tt_cnt_[e1];
+                                if (tt_cnt_[e1] < k - 2 && !visit_[e1]) {
+                                    q.push(e1);
+                                    visit_[e1] = true;
+                                }
+                            }
+                            if (truss_time <= tt2 && tt1 << tt2) {
+                                --tt_cnt_[e2];
+                                if (tt_cnt_[e2] < k - 2 && !visit_[e2]) {
+                                    q.push(e2);
+                                    visit_[e2] = true;
+                                }
+                            }
+                        }
+                    }
+                    cn_[eid].clear();
+                    // truss_[eid] = 0;
+                }
+
+                /*
+                // 乐观策略，假设部分删除边 不都会 影响truss time
+                if (!nbr_cnt_[eid]) {
                     if (!visit_[eid]) {
                         q.push(eid);
                         visit_[eid] = true;
@@ -726,7 +764,7 @@ void Graph::index() {
                         cn_[e1].erase(lower_bound(cn_[e1].begin(), cn_[e1].end(), v));
                         cn_[e2].erase(lower_bound(cn_[e2].begin(), cn_[e2].end(), u));
 
-                        if (truss_[e1] >= k && truss_[e2] >= k) {
+                        if (k <= truss_[e1] && k <= truss_[e2]) {
                             int tt1 = truss_t_[e1][k - 2].back().second;
                             int tt2 = truss_t_[e2][k - 2].back().second;
                             if (truss_time <= tt1 && tt2 <= tt1) {
@@ -748,40 +786,13 @@ void Graph::index() {
                     cn_[eid].clear();
                     // truss_[eid] = 0;
                 } else {
-                    // 部分删除
-                    int aaa = nbr_cnt_[eid];
-                    int szz = nbr_t_[u][v].size();
-                    int new_e_t = nbr_t_[u][v][nbr_t_[u][v].size() - aaa];
-                    if (new_e_t >= truss_time) { // ???
-                        if (!visit_[eid]) {
-                            q.push(eid);
-                            visit_[eid] = true;
-                        }
-                        for (const auto& w : cn_[eid]) {
-                            int e1 = nbr_[u][w];
-                            int e2 = nbr_[v][w];
-                            if (truss_[e1] >= k && truss_[e2] >= k) {
-                                int tt1 = truss_t_[e1][k - 2].back().second;
-                                int tt2 = truss_t_[e2][k - 2].back().second;
-
-                                if (truss_time <= tt1 && tt2 <= tt1 && new_e_t > tt1) {
-                                    --tt_cnt_[e1];
-                                    if (tt_cnt_[e1] < k - 2 && !visit_[e1]) {
-                                        q.push(e1);
-                                        visit_[e1] = true;
-                                    }
-                                }
-                                if (truss_time <= tt2 && tt1 <= tt2 && new_e_t > tt2) {
-                                    --tt_cnt_[e2];
-                                    if (tt_cnt_[e2] < k - 2 && !visit_[e2]) {
-                                        q.push(e2);
-                                        visit_[e2] = true;
-                                    }
-                                }
-                            }
-                        }
+                    int e_t = nbr_t_[u][v][nbr_t_[u][v].size() - nbr_cnt_[eid]];
+                    if (e_t > truss_time && !visit_[eid]) {
+                        q.push(eid);
+                        visit_[eid] = true;
                     }
                 }
+                */
             }
             while (!q.empty()) {
                 int eid = q.front();
@@ -820,6 +831,8 @@ void Graph::index() {
                         if (t <= new_t) ++tt_cnt_[eid];
                     }
                 }
+
+                if (new_t == old_t) continue;
 
                 // 更新 index
                 if (truss_t_[eid][k - 2].back().first == t_s) {
